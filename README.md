@@ -11,6 +11,7 @@ cd linux-4.14.98
 # Copy the kernel_config.txt to .config
 cp ../module-overwrite/kernel_config.txt .config
 # build
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
 
 # Now here build the module

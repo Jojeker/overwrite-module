@@ -1,0 +1,1 @@
+cmd_/home/hexsens/Documents/overwrite-module/overwrite.ko := aarch64-linux-gnu-ld.bfd -r -maarch64linux -T ./scripts/module-common.lds -T ./arch/arm64/kernel/module.lds --build-id  -o /home/hexsens/Documents/overwrite-module/overwrite.ko /home/hexsens/Documents/overwrite-module/overwrite.o /home/hexsens/Documents/overwrite-module/overwrite.mod.o ;  true
