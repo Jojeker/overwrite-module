@@ -22,6 +22,200 @@
 #include <linux/stop_machine.h>
 #include <asm/cacheflush.h>
 #include <asm/insn.h>
+#include <linux/io.h>          // memremap, memunmap
+#include <asm/barrier.h>
+
+
+// Write to page and map it writable on our own:
+// 1) Find the pt descriptor that maps va (walk the trns tables starting at kernel top-level table).
+// 2) Modify descriptor bits that control access permissions (clear the write-prot bit).
+// 3) Make the change visible: write descriptor, sequence of memory barriers and TLB invalidate VA.
+// 4) Unmap any temporary mappings used for the table pages.
+
+// Page Table entry shifts for VA
+// Level 0 index covers bits [47:39] (shift 39)
+// Level 1 index covers bits [38:30] (shift 30)
+// Level 2 index covers bits [29:21] (shift 21)
+// Level 3 index covers bits [20:12] (shift 12)
+// ==> Each is 9 bits (index mask 0x1ff)
+
+
+// From linux docs:
+// +--------+--------+--------+--------+--------+--------+--------+--------+
+// |63    56|55    48|47    40|39    32|31    24|23    16|15     8|7      0|
+// +--------+--------+--------+--------+--------+--------+--------+--------+
+//  |                 |         |         |         |         |
+//  |                 |         |         |         |         v
+//  |                 |         |         |         |   [11:0]  in-page offset
+//  |                 |         |         |         +-> [20:12] L3 index
+//  |                 |         |         +-----------> [29:21] L2 index
+//  |                 |         +---------------------> [38:30] L1 index
+//  |                 +-------------------------------> [47:39] L0 index
+//  +-------------------------------------------------> [63] TTBR0/1
+
+// We know that the kernel uses 4KB page size:
+// root@udx710-module:/ # cat /proc/self/smaps | grep -i 'PageSize'
+// KernelPageSize:        4 kB
+// MMUPageSize:           4 kB
+
+#define L3_SHIFT 12
+#define IDX_MASK 0x1ffUL
+
+// One descriptor is 8 bytes (64 bits)
+#define DESCRIPTOR_SIZE 8UL
+
+// AP[2:1] Access Protection at bits [7:6];
+// see: OS use of translation table descriptors
+// AP[2]=1 means write-protect (both EL0 and EL1)
+// https://documentation-service.arm.com/static/5efa1d23dbdee951c1ccdec5
+#define AP2 (1ULL << 7)
+
+// Read TTBR1_EL1 (inline asm mrs ttbr1_el1, x). [Kernel is EL1]
+static inline unsigned long rd_ttbr1(void)
+{
+    // This is the physical base of the level-0 (top) table for kernel addresses
+    unsigned long v;
+    asm volatile("mrs %0, ttbr1_el1" : "=r"(v));
+    return v;
+}
+
+static inline phys_addr_t desc_phys(u64 d) { return d & ~((1ULL<<12)-1); }
+
+static inline void tlbi_va(unsigned long va)
+{
+    unsigned long ipa = va >> 12;
+    asm volatile("dsb ishst; tlbi vae1is, %0; dsb ish; isb" :: "r"(ipa));
+}
+
+struct pte_loc { void *page_va; size_t off; u64 desc; };
+
+// Returns 0 and fills loc on success. Caller must memunmap(loc->page_va).
+static unsigned long* locate_pte(unsigned long va, struct pte_loc *loc)
+{
+    // -> Clears attribute/flag bits and any offset
+    // -> Provide 4 KB-aligned physical base address of the level-0 (top) table
+    unsigned long* table = 0xffffff8008dc4000 & ~((1 << 12) - 1);
+    pr_warn("table base: %p\n", table);
+
+    // Get the index for the current level
+    unsigned long idx = (va >> (30)) & IDX_MASK;
+    // Physical page table entry that we have to consult
+    unsigned long ent_pa = table[idx];
+    // Get page physical address of the next level entry (clear the 12 bits to get to base)
+    unsigned long* page_pa = (unsigned long)ent_pa & ~((phys_addr_t)PAGE_SIZE-1);
+
+    pr_warn("page_pa=%p ent_pa=%lx idx=%u\n", page_pa, ent_pa, idx);
+
+    unsigned long *map = memremap(page_pa, PAGE_SIZE, MEMREMAP_WB);
+
+    if (!map) {
+        pr_err("ptewalk: FAIL to map");
+        return -EINVAL;
+    }
+
+    pr_err("ptewalk: virt addr=%lx\n",map);
+
+    // Get the index for the current level
+    unsigned long l2idx = (va >> (21)) & IDX_MASK;
+    // Physical page table entry that we have to consult
+    unsigned long l2ent_pa = map[l2idx];
+    // Get page physical address of the next level entry (clear the 12 bits to get to base)
+    unsigned long* l2page_pa = (unsigned long)l2ent_pa & ~((phys_addr_t)PAGE_SIZE-1);
+
+    pr_warn("page_pa=%p ent_pa=%lx idx=%u\n", l2page_pa, l2ent_pa, l2idx);
+
+    if ((unsigned long)l2page_pa & 0xFFFF000000000000){
+        pr_warn("end of translation reached after 2 steps!");
+        return &map[l2idx];
+    }
+
+
+    unsigned long *l2map = memremap(l2page_pa, PAGE_SIZE, MEMREMAP_WB);
+
+    if (!l2map) {
+        pr_err("ptewalk: FAIL to map");
+        return -EINVAL;
+    }
+
+    pr_err("ptewalk: virt addr=%lx\n",l2map);
+
+    // Get the index for the current level
+    unsigned long l3idx = (va >> (12)) & IDX_MASK;
+    // Physical page table entry that we have to consult
+    unsigned long l3ent_pa = l2map[l3idx];
+    // Get page physical address of the next level entry (clear the 12 bits to get to base)
+    unsigned long* l3page_pa = (unsigned long)l3ent_pa & ~((phys_addr_t)PAGE_SIZE-1);
+
+    pr_warn("page_pa=%p ent_pa=%lx idx=%u\n", l3page_pa, l3ent_pa, l3idx);
+
+    return (unsigned long*) &l2map[l3idx];
+        // Get the virtual address for physical page address
+        // void *map = memremap(page_pa, PAGE_SIZE, MEMREMAP_WB);
+
+        // if (!map) {
+        //     pr_err("ptewalk: FAIL at L%d: TTBR1=0x%016lx idx=%u ent_pa=%pa page_pa=%pa\n",
+        //            level, rd_ttbr1(), (unsigned)((va >> (30 - 9*level)) & 0x1ff),
+        //            &ent_pa, &page_pa);
+        //     return -EINVAL;
+        // }
+
+        // pr_err("ptewalk: OK at L%d: TTBR1=0x%016lx idx=%u ent_pa=%pa page_pa=%pa\n",
+        //        level, rd_ttbr1(), (unsigned)((va >> (30 - 9*level)) & 0x1ff),
+        //        &ent_pa, &page_pa);
+
+        // Now inside the virt. page, get the offset to the entry --> next level base
+        // size_t off = ent_pa - page_pa;
+        // u64 *ent = (u64 *)((u8 *)map + off);
+        // u64 d = READ_ONCE(*ent);
+
+        // table/page bit pattern is 0b11 in low bits for
+        // table/page entries (if not we are screwed)
+        // if (level < 3) {
+        //     // We have something else :S
+        //     if ((d & 0x3) != 0x3) { return -EAGAIN; } // block mapping, not handled
+
+        //     // Get page table base (clear 12 bits again)
+        //     table = desc_phys(d);
+        //     continue;
+        // }
+
+        // // final level, must be page descriptor (0b11) otherwise no idea?
+        // if ((d & 0x3) != 0x3) { return -EBADF; }
+
+        // // Now we can get the final pte location: our map is the given virt address of the pte
+        // // offset and descriptor are also OK
+        // loc->page_va = map; loc->off = off; loc->desc = d;
+        return 0;
+}
+
+// Make VA’s page RW at EL1 by clearing AP[2] in the PTE
+int make_page_el1_rw(unsigned long va)
+{
+    struct pte_loc loc;
+
+    // get the PTE
+    int rc = locate_pte(va, &loc);
+    if (rc) {
+        pr_err("Failed to locate PTE for VA %lx: %d\n", va, rc);
+        return rc;
+    }
+
+    // Clear the write protection bit
+    u64 newd = loc.desc & ~AP2;
+    u64 *ent = (u64 *)((u8 *)loc.page_va + loc.off);
+    WRITE_ONCE(*ent, newd);
+
+    // dsb: force completion and visibility of prior memory accesses
+    dsb(ishst);
+
+    // TLB invalidate that VA we want to modify
+    tlbi_va(va);
+
+    // Unmap the page table entry
+
+    //Done
+    return 0;
+}
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Hexhive");
@@ -37,7 +231,7 @@ static unsigned long printk_off=0x000729e0 ;   // offset of printk in *decompres
 module_param(printk_off, ulong, 0644);
 MODULE_PARM_DESC(printk_off, "printk offset in Image (hex or dec)");
 
-static unsigned long target_off = 0x0036a560;   // offset of target function in Image
+static unsigned long target_off = 0x00017378;   // offset of target function in Image
 module_param(target_off, ulong, 0644);
 MODULE_PARM_DESC(target_off, "target offset in Image (hex or dec)");
 
@@ -113,14 +307,21 @@ static int write4_bytes(void *data)
     struct patch_ctx *ctx = data;
     unsigned long va = (unsigned long)ctx->addr;
     u32 orig;
+    u8 rc;
 
     if (va & 3UL) { ctx->rc = -EINVAL; return 0; }
 
     /* Test: idempotent write */
     if (!read_u32(ctx->addr, &orig)) { ctx->rc = -EIO; return 0; }
 
-    /* 1) SAME value */
-    WRITE_ONCE(*(u32 __force *)ctx->addr, orig);
+    // Now: set the pte to writeable
+    rc = make_page_el1_rw(va);
+    if (rc) {
+        ctx->rc = -ENOMEM;
+        return 0;
+    }
+
+    WRITE_ONCE(*(u32 __force *)va, ctx->insn);
 
     /* write globally visible before I-cache maint */
     dsb(ishst);
@@ -199,6 +400,8 @@ static int parse_pattern(const char *s){
     }
     return 0;
 }
+
+void (*show_pte)(unsigned long addr);
 
 static int __init scan_text_init(void)
 {
@@ -292,18 +495,78 @@ static int __init scan_text_init(void)
                 struct patch_ctx ctx = { .addr = (void*)addr, .insn =  repl, .rc = -1 };
                 pr_info("hexscan: MATCH VA=%px PA=0x%llx\n",
                         (void *)addr, (unsigned long long)pa);
-                dump_window(addr, 96, 96);
+                // dump_window(addr, 96, 96);
 
                 if ((addr & 3UL) != 0) {
                     pr_warn("hexscan: match at non-aligned addr %px — skipping\n", (void *)addr);
                     continue;
                 }
 
-                ret = stop_machine(write4_bytes, &ctx, NULL);
-                if (ret || ctx.rc) {
-                    pr_err("hexscan: write failed (%d)\n", ret);
-                } else {
-                    pr_info("hexscan: write OK at %px new bytes %x\n", (void *)addr, repl);
+                {
+                    show_pte = (void *)addr;
+                    unsigned long* test = vmalloc(PAGE_SIZE);
+                    unsigned long* test2 = vmalloc(PAGE_SIZE);
+                    *test = 0x12345678;
+                    *test2 = 0x98765432;
+
+                    pr_warn("test=%p", test);
+                    unsigned long* ver_pageentry;
+                    unsigned long* test_pageentry;
+                    // unsigned long ver_entry = (unsigned long)&printk;
+                    unsigned long ver_entry = 0xffffff8008298b20;
+                    pr_warn("verentry=%lx masked=%lx", ver_entry, ver_entry & ~((1 << 21 )  - 1));
+                    dump_window(ver_entry & ~((1 << 21 )  - 1), 0, 96);
+
+                    // show_pte((unsigned long )test);
+                    // show_pte((unsigned long )ver_entry);
+                    test_pageentry = locate_pte((unsigned long)test, NULL);
+                    ver_pageentry = locate_pte((unsigned long)ver_entry, NULL);
+
+                    pr_warn("test_pageentry=%lx", (unsigned long)test_pageentry);
+                    pr_warn("ver_pageentry=%lx", (unsigned long)ver_pageentry);
+
+                    pr_warn("*test_pageentry=%p", *(unsigned long*)test_pageentry);
+                    pr_warn("*ver_pageentry=%p", *(unsigned long*)ver_pageentry);
+                    unsigned long valver = *ver_pageentry;
+                    unsigned long valtest = *test_pageentry;
+
+                    valver &= (0x000FFFFFFFFFF000);
+                    valtest &= ~(0x000FFFFFFFFFF000);
+                    valtest |= (valver + 0x1F4000);
+
+
+                    pr_warn("valtest=%lx valver=%lx", valtest, valver);
+                    *test_pageentry = valtest;
+                    // // dsb: force completion and visibility of prior memory accesses
+
+                    dsb(ishst);
+                    tlbi_va(test);
+                   	dsb(ish);
+                   	isb();
+                    pr_warn("flushed.");
+
+                    // // unsigned long phys = virt_to_phys(test);
+
+
+                    int j = 0;
+                    while(j < 4000){
+                        unsigned long* a = vmalloc(PAGE_SIZE);
+                        *a = 0xdeadbeef;
+                        j++;
+                    }
+                    if(*test == 0x12345678){
+                        pr_warn("failed to map.");
+                        return -1;
+                    }
+
+                    // show_pte((unsigned long)test);
+                    // // locate_pte((unsigned long)test, NULL);
+                    dump_window((char*)test + 350, 0, 96);
+
+                    char* ctest = (char*)test;
+                    pr_info("test=%x", *(ctest + 344));
+                    *(ctest + 344) = 0x7b;
+                    dump_window((char*)test + 350, 0, 96);
                 }
 
                 matches++;
