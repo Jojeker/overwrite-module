@@ -3,3 +3,10 @@ linux-4.14.98
 *.ko
 *.mod.*
 *.so
+ubi_modem.out
+ubi_modem.out.mod
+shellcode.elf
+shellcode.bin
+out.txt
+.null-*
+
