@@ -21,7 +21,7 @@
 } while(0)
 
 #define ACTUAL_CALL_TARGET_INSN() do { \
-	asm volatile ("bl 0x000001\n" \
+	asm volatile ("bl 0xe00001\n" \
 			: \
 			: \
 			:); \

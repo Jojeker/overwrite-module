@@ -1,9 +1,9 @@
 #include "stdlib.h"
 
 // === Static variables pointers ===
-int* CAN_FUZZ_NOW_PTR = 0x00000000;
-int* IS_INIT = 0x00000000;
-int** REGION_FOR_WRITES = 0x00000000;
+int* CAN_FUZZ_NOW_PTR = 0x11111111;
+int* IS_INIT = 0x22222222;
+int** REGION_FOR_WRITES = 0x33333333;
 // ===+++++++++++++++++++++++++++===
 
 // === Patch for getting LR ===
@@ -48,8 +48,8 @@ void _start () {
     }
 
     // Define fns for outward communication
-    spipe_open_t sofn = (spipe_open_t)(void*)spipe_open_addr;
-    spipe_write_t swfn = (spipe_write_t)(void*)spipe_write_addr;
+    spipe_open_t sofn = (spipe_open_t)(void*)SPIPE_OPEN_ADDR;
+    spipe_write_t swfn = (spipe_write_t)(void*)SPIPE_WRITE_ADDR;
     int lr_addr = 0;
    
     // TODO: figure out where lr is and read it from the stack (right offset)
