@@ -9,10 +9,10 @@
 
 // === Patch for getting LR ===
 // we increase SP by 0x100 so we have to
-// add 0x100 + 4 for the LR as the last one
+// add 100 (our stack frame) + 12*4 for the other registers (r0 - r11)
 #define PATCHED_INSN(val_out) do { \
 	asm volatile( \
-	    "ldr %0, [sp, #0x104]" \
+	    "ldr %0, [sp, #152]" \
 	    : "=r" (val_out) \
 	    : \
 	    : "memory" \
@@ -53,13 +53,17 @@ void _start () {
     } else {
 
 	// TODO: figure out where lr is and read it from the stack (right offset)
-	// PATCHED_INSN(lr_addr);
+	PATCHED_INSN(lr_addr);
       
 	// Write the stuff into our buffer (TODO)
 	
 	// Write the address verbatim out
 	// swfn(9, (char*)lr_addr, 4, 0);
-	swfn(9, "NICE", 4, 0);
+	swfn(9, "OUT:", 4, 0);
+	// We give the address of lr_address since the function
+	// dereferences the ptr and prints whatever is stored in
+	// the variable (and beyond ;*)
+	swfn(9, (char*)&lr_addr, 4, 0);
     }
 
     restore_space_stack();

@@ -39,7 +39,6 @@ void _start () {
     // (replaced by keystone)
     CALL_TO_MAIN_SHELLCODE_INSN();
 
-    // TODO: MUST BE WITH LR?
     restore_context_and_lr();
 
     // Now we are done, so we can branch to the
