@@ -33,7 +33,7 @@ $(MAIN_TARGET).bin: stdlib.h $(MAIN_SRCS)
 	arm-none-eabi-objcopy -O binary $(MAIN_TARGET).elf $(MAIN_TARGET).bin
 
 $(INIT_TARGET).bin: stdlib.h $(INIT_SRCS)
-	arm-none-eabi-gcc -mthumb -march=armv8-a+thumb -march=armv8-a -Os -Wall -static -nostdlib -fno-asynchronous-unwind-tables -fpic -c -o $(INIT_OBJS) $(INIT_SRCS)
+	arm-none-eabi-gcc -nostdlib -nodefaultlibs -mthumb -march=armv8-a+thumb -march=armv8-a -Os -Wall -static -nostdlib -fno-asynchronous-unwind-tables -fpic -c -o $(INIT_OBJS) $(INIT_SRCS)
 	arm-none-eabi-gcc -static -nostdlib -fno-asynchronous-unwind-tables -fpic $(INIT_OBJS) -Wl,-Tscript.T,--build-id=none -o $(INIT_TARGET).elf
 	arm-none-eabi-objcopy -O binary $(INIT_TARGET).elf $(INIT_TARGET).bin
 

@@ -23,7 +23,7 @@ typedef void* (*malloc_t)(int, char*, int);
 #define SPIPE_OPEN_ADDR  (0x9022eff2 | 0x1)
 #define SPIPE_READ_ADDR (0x9022effe | 0x1)
 #define SPIPE_WRITE_ADDR (0x9022f010 | 0x1)    
-#define MALLOC_ADDR (0x0079f6a6 + REBASE) | 1;
+#define MALLOC_ADDR ((0x0079f6a6 + REBASE) | 1)
 //////////////////////////////////////////////////////////////
 
 
@@ -58,6 +58,15 @@ static __inline__ void restore_context_and_lr(){
     );
 }
 
+static __inline__ void save_lr(void) {
+    asm volatile(
+        "push {lr}"
+        :
+        :
+        : "memory"
+    );
+}
+
 static __inline__ void make_space_stack(){
     asm volatile(
     "sub sp, #100"
@@ -81,7 +90,7 @@ static __inline__ void ret(){
     "pop {pc}"
     :
     :
-    : "pc", "memory"
+    : "memory"
     );
 }
 

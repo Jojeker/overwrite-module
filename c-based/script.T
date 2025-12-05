@@ -18,5 +18,7 @@ SECTIONS
     {
         *(.interp)
         *(.comment)
+        *(.got)
+        *(.got.plt)
     }
 }

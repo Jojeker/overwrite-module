@@ -82,7 +82,7 @@ tr_arm32_sc = bytearray(open("trampoline_shellcode_arm32.bin", "rb").read())
 init_sc_addr = 0x00e00dc4
 
 # We have to change the caller to jump to our address now
-init_sc_caller = 0x00a0f33e
+init_sc_caller = 0x00a0f30e
 
 # We jump to the init_sc_addr
 CODE_INIT = f'bl     #{hex(init_sc_addr | 0x1)};'
@@ -96,29 +96,12 @@ init_sc_call_patch = init_sc_call_synth.get_patch()
 init_sc_caller_tgt = ShellcodeTarget(init_sc_caller, init_sc_call_patch)
 prev_code_init_sc_caller = init_sc_caller_tgt.inject_sc(modem, -1, DEBUG)
 
-
-# Data section entries that we use in our main shellcode
-init_sc_data_offset = 0x60
-init_sc_data_section_addr_region_for_writes = init_sc_addr + init_sc_data_offset + 0
-packed_region_for_writes = struct.pack("<I", init_sc_data_section_addr_region_for_writes)
-init_sc_data_section_addr_is_init = init_sc_addr + init_sc_data_offset  + 4
-packed_is_init = struct.pack("<I", init_sc_data_section_addr_is_init)
-init_sc_data_section_addr_can_fuzz_now = init_sc_addr + init_sc_data_offset + 8
-packed_can_fuzz_now = struct.pack("<I", init_sc_data_section_addr_can_fuzz_now)
-
-if (DEBUG):
-    print(f"--- Global offsets: ---\npacked_region_for_writes={packed_region_for_writes} ({hex(init_sc_data_section_addr_region_for_writes)})\npacked_is_init={packed_is_init}({hex(init_sc_data_section_addr_is_init)})\npacked_can_fuzz_now={packed_can_fuzz_now}({hex(init_sc_data_section_addr_can_fuzz_now)})")
-    print(f"--- Data at offsets: ---\nregion_for_writes={init_sc[init_sc_data_section_addr_region_for_writes - init_sc_addr: init_sc_data_section_addr_region_for_writes - init_sc_addr + 4]}\nis_init={init_sc[init_sc_data_section_addr_is_init - init_sc_addr :init_sc_data_section_addr_is_init  - init_sc_addr + 4]}\ncan_fuzz_now={init_sc[init_sc_data_section_addr_can_fuzz_now - init_sc_addr : init_sc_data_section_addr_can_fuzz_now  - init_sc_addr + 4]}")
-
-
 # Now inject the shellcode to our target address
 # We discard the previous_code since we overwrite empty space
 init_sc_tgt = ShellcodeTarget(init_sc_addr, init_sc)
 
-# TODO: get the offset automatically and do it without manual change
-# WARN: this is a hard-coded offset for now!
-offset_into_init_sc = 0x3a
-
+offset_into_init_sc = init_sc.find(b'\x0b"\x02 ')
+print(f"[!] Offset for init-shellcode: {hex(offset_into_init_sc)}")
 
 init_sc_tgt.fixup_sc(prev_code_init_sc_caller, offset_into_init_sc, len(prev_code_init_sc_caller))
 
@@ -128,109 +111,143 @@ if(DEBUG):
 _ = init_sc_tgt.inject_sc(modem, -1, False)
 
 
-# #####################
-# #  MAIN SHELLCODE   #
-# #####################
+#####################
+#  MAIN SHELLCODE   #
+#####################
+
+if(DEBUG):
+    print("Patching main shellcode now!")
+
+# Must overwrite the vars to get the pointers to INIT right
+# NO caller must be overwritten because we just `ret`
+main_sc_addr = 0x00e00850
+
+# Fixup the code to get the constants right...
+main_sc_tgt = ShellcodeTarget(main_sc_addr, main_sc)
+
+# Inject the main_sc_tgt shellcode that we changed
+# We are not interested in the empty bytes...
+_ = main_sc_tgt.inject_sc(modem, -1, DEBUG)
+
+#####################
+#  TRAMP SHELLCODE  #
+#####################
+
+if DEBUG:
+    print("Patching trampoline shellcode now!")
+
+# Must overwrite the main_shellcode pointer to get it right (exec it)
+# once per target, they are offset by 16 bytes (c.f. below)
+tramp_addr_base = 0x00e00cd0 # Imagine having x of them...
+
+# We truncate after 16 bytes (c.f. below)
+# THUMB:
+# ------
+# 00000000 <_start>:
+#    0:   e92d 4fff       stmdb   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}
+#    4:   f7ff fffc       bl      0 <_start>
+#    8:   e8bd 0fff       ldmia.w sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp}
+#    c:   f1ff d7f8       bl      e00000 <spipe_open_addr+0xdfffe4>
+# ARM32:
+# ------
+# 00000000 <_start>:
+#    0:   e92d4fff        push    {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}
+#    4:   ebfffffd        bl      0 <_start>
+#    8:   e8bd0fff        pop     {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp}
+#    c:   eb37fffb        bl      e00000 <spipe_open_addr+0xdfffe4>
+len_sc_trunc = 16
+
+# We need to adjust the branch to our main shellcode
+MAIN_SHELLCODE_ADDR_OFF_THUMB =  0x04
+MAIN_SHELLCODE_ADDR_OFF_ARM32 =  0x04
+
+# We need to adjust the call target to go back to the actual 
+TGT_ADDR_OFF_THUMB =  0x0c
+TGT_ADDR_OFF_ARM32 =  0x0c
+
+# Must overwrite return insn since we jump to the actual call target
+# only once since we should know what mode we come from
+
+# Format [call-site address; callee address]
+tramp_arm32_to_thumb_pairs = [(0x00d09f14,0x00a0ec70)]
+tramp_arm32_to_arm32_pairs = [] # Don't seem to exist? Need to scan with ghidrascript..
+tramp_thumb_to_thumb_pairs = [(0x00a0f312,0x0038b224)]
+tramp_thumb_to_arm32_pairs = [(0x00a1df44,0x007a8cb0)] # TODO: How do i check that it works?
+
+
+# multiplier for our offsets
+trampolie_inject_counter = 0
+
+# We need to put the main address here as well
+# WARN: we need to do the ORR trick in thumb to get it right...
+tramp_main_shellcode_caller = main_sc_addr
+CODE_ARM32 = f"""
+    blx     #{hex(tramp_main_shellcode_caller | 0x1)};
+"""
+CODE_THUMB = f"""
+    bl     #{hex(tramp_main_shellcode_caller)};
+"""
+
+# Thumb -[bl]-> Thumb pairs
+# => Transformed to thumb -[bl]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[bl]-> Thumb callee
+for call_site, callee in tramp_thumb_to_thumb_pairs:
+    trampoline_address = tramp_addr_base + trampolie_inject_counter * len_sc_trunc
+    # First: jump to our main shellcode....
+    dispatch_synth = ShellcodeSynth(trampoline_address + MAIN_SHELLCODE_ADDR_OFF_THUMB, KS_MODE_THUMB, CODE_THUMB, DEBUG)
+    main_shellcode_bl_patch = dispatch_synth.get_patch()
+
+    # Second: jump to our actual callee...
+    CODE_BL_TO_CALLEE_THUMB_TO_THUMB = f'''
+        b #{hex(callee)}
+    '''
+    callee_synth = ShellcodeSynth(trampoline_address + TGT_ADDR_OFF_THUMB, KS_MODE_THUMB, CODE_BL_TO_CALLEE_THUMB_TO_THUMB, DEBUG)
+    callee_bl_patch = callee_synth.get_patch()
+
+    sc_tgt_trampoline = ShellcodeTarget(trampoline_address, tr_thumb_sc)
+
+    # Fixup our shellcode with the rigth addresses
+    sc_tgt_trampoline.fixup_sc(main_shellcode_bl_patch, MAIN_SHELLCODE_ADDR_OFF_THUMB, 4)
+    sc_tgt_trampoline.fixup_sc(callee_bl_patch, TGT_ADDR_OFF_THUMB, 4)
+
+    if(DEBUG):
+        print(f"addr={hex(trampoline_address)}\nsc_tgt_trampoline={sc_tgt_trampoline._sc_bin[:16].hex()}\nTrampoline:\n{disasm(sc_tgt_trampoline._sc_bin[:16], arch='thumb')}")
+
+    # Put it in the modem
+    _ = sc_tgt_trampoline.inject_sc(modem, 16, False)
+
+    # Finally: patch the actual address... to go to our shellcode trampoline
+    CODE_BL_TO_SHELLCODE_TRAMPOLINE = f'bl     #{hex(trampoline_address)};'
+        
+    call_site_synth = ShellcodeSynth(call_site, KS_MODE_THUMB, CODE_BL_TO_SHELLCODE_TRAMPOLINE, DEBUG)
+    call_site_patch = call_site_synth.get_patch()
+
+    # Now that we have the shellcode, we have to inject it...
+    # Discard the jump (we have to recompute anyways...)
+    call_site_patch_tgt = ShellcodeTarget(call_site, call_site_patch)
+    _ = call_site_patch_tgt .inject_sc(modem, 4, DEBUG)
+
+    # One trampoline injected!
+    trampolie_inject_counter += 1
+
+# Thumb -[blx]-> arm32 pairs
+# => Transformed to thumb -[bl]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[blx]-> ARM32 callee
+# for call_site, callee in tramp_thumb_to_arm32_pairs:
+#     pass
+
 #
-# if(DEBUG):
-#     print("Patching main shellcode now!")
-#
-# # Must overwrite the vars to get the pointers to INIT right
-# # NO caller must be overwritten because we just `ret`
-# main_sc_addr = 0x00e00850
-#
-# # Fixup the code to get the constants right...
-# main_sc_tgt = ShellcodeTarget(main_sc_addr, main_sc)
-# # Fix up every address manually:
-# main_sc_data_addr = 0x40
-# # REGION_FOR_WRITES
-# main_sc_tgt.fixup_sc(packed_region_for_writes, main_sc_data_addr + 0, 4)
-# # IS_INIT
-# main_sc_tgt.fixup_sc(packed_is_init, main_sc_data_addr + 4, 4)
-# # CAN_FUZZ_NOW
-# main_sc_tgt.fixup_sc(packed_can_fuzz_now, main_sc_data_addr + 8, 4)
-#
-# if (DEBUG):
-#     # fixed_up_main_sc_name = "fixed_up_main_sc_name.bin"
-#     # print(f"Writing fixed up shellcode to {fixed_up_main_sc_name}")
-#     # open(fixed_up_main_sc_name, "wb").write(main_sc_tgt._sc_bin)
-#     print(f"main_sc_addr={hex(main_sc_addr)}\n{main_sc_tgt._sc_bin.hex()}")
-#     print(f"Disassembled main SC after mod:\n{disasm(main_sc_tgt._sc_bin, arch='thumb')}")
-#
-# # Inject the main_sc_tgt shellcode that we changed
-# # We are not interested in the empty bytes...
-# _ = main_sc_tgt.inject_sc(modem, -1, False)
-#
-# #####################
-# #  TRAMP SHELLCODE  #
-# #####################
-#
-#
-# # Must overwrite the main_shellcode pointer to get it right (exec it)
-# # once per target, they are offset by 16 bytes (c.f. below)
-# tramp_addr_base = 0x00e00cd0 # Imagine having x of them...
-#
-# # We truncate after 16 bytes (c.f. below)
-# # THUMB:
-# # ------
-# # 00000000 <_start>:
-# #    0:   e92d 4fff       stmdb   sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}
-# #    4:   f7ff fffc       bl      0 <_start>
-# #    8:   e8bd 0fff       ldmia.w sp!, {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp}
-# #    c:   f1ff d7f8       bl      e00000 <spipe_open_addr+0xdfffe4>
-# # ARM32:
-# # ------
-# # 00000000 <_start>:
-# #    0:   e92d4fff        push    {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp, lr}
-# #    4:   ebfffffd        bl      0 <_start>
-# #    8:   e8bd0fff        pop     {r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, sl, fp}
-# #    c:   eb37fffb        bl      e00000 <spipe_open_addr+0xdfffe4>
-# len_sc_trunc = 16
-#
-# # We need to adjust the branch to our main shellcode
-# MAIN_SHELLCODE_ADDR_OFF_THUMB =  0x04
-# MAIN_SHELLCODE_ADDR_OFF_ARM32 =  0x04
-#
-# # We need to adjust the call target to go back to the actual 
-# TGT_ADDR_OFF_THUMB =  0x0c
-# TGT_ADDR_OFF_ARM32 =  0x0c
-#
-# # Must overwrite return insn since we jump to the actual call target
-# # only once since we should know what mode we come from
-#
-# # Format [call-site address; callee address]
-# tramp_arm32_to_thumb_pairs = [(0x00d09f14,0x00a0ec70)]
-# tramp_arm32_to_arm32_pairs = [] # Don't seem to exist? Need to scan with ghidrascript..
-# tramp_thumb_to_thumb_pairs = [(0x00a0f312,0x0038b224)]
-# tramp_thumb_to_arm32_pairs = [(0x00a1df44,0x007a8cb0)] # TODO: How do i check that it works?
-#
-#
-# # multiplier for our offsets
-# trampolie_inject_counter = 0
-#
-# # We need to put the main address here as well
-# # WARN: we need to do the ORR trick in thumb to get it right...
-# tramp_main_shellcode_caller = main_sc_addr
-# CODE_ARM32 = f"""
-#     blx     #{hex(tramp_main_shellcode_caller | 0x1)};
-# """
-# CODE_THUMB = f"""
-#     bl     #{hex(tramp_main_shellcode_caller)};
-# """
-#
-# # Thumb -[bl]-> Thumb pairs
-# # => Transformed to thumb -[bl]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[bl]-> Thumb callee
-# for call_site, callee in tramp_thumb_to_thumb_pairs:
+# ARM32 -[blx]-> Thumb pairs
+# => Transformed to ARM32 -[blx]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[bl]-> Thumb callee
+# for call_site, callee in tramp_arm32_to_thumb_pairs:
 #     trampoline_address = tramp_addr_base + trampolie_inject_counter * len_sc_trunc
 #     # First: jump to our main shellcode....
-#     dispatch_synth = ShellcodeSynth(trampoline_address + MAIN_SHELLCODE_ADDR_OFF_THUMB, KS_MODE_THUMB, CODE_THUMB, DEBUG)
+#     dispatch_synth = ShellcodeSynth(trampoline_address + MAIN_SHELLCODE_ADDR_OFF_ARM32, KS_MODE_ARM, CODE_ARM32, DEBUG)
 #     main_shellcode_bl_patch = dispatch_synth.get_patch()
 #
 #     # Second: jump to our actual callee...
-#     CODE_BL_TO_CALLEE_THUMB_TO_THUMB = f'''
-#         bl #{hex(callee)}
+#     CODE_B_TO_CALLEE_ARM32_TO_THUMB = f'''
+#         b #{hex(callee)}
 #     '''
-#     callee_synth = ShellcodeSynth(trampoline_address + TGT_ADDR_OFF_THUMB, KS_MODE_THUMB, CODE_BL_TO_CALLEE_THUMB_TO_THUMB, DEBUG)
+#     callee_synth = ShellcodeSynth(trampoline_address + TGT_ADDR_OFF_ARM32, KS_MODE_THUMB, CODE_BL_TO_CALLEE_THUMB_TO_THUMB, DEBUG)
 #     callee_bl_patch = callee_synth.get_patch()
 #
 #     sc_tgt_trampoline = ShellcodeTarget(trampoline_address, tr_thumb_sc)
@@ -243,7 +260,7 @@ _ = init_sc_tgt.inject_sc(modem, -1, False)
 #         print(f"addr={hex(trampoline_address)}\nsc_tgt_trampoline={sc_tgt_trampoline._sc_bin[:16].hex()}\nTrampoline:\n{disasm(sc_tgt_trampoline._sc_bin[:16], arch='thumb')}")
 #
 #     # Put it in the modem
-#     sc_tgt_trampoline.inject_sc(modem, 16, False)
+#     _ = sc_tgt_trampoline.inject_sc(modem, 16, False)
 #
 #     # Finally: patch the actual address... to go to our shellcode trampoline
 #     CODE_BL_TO_SHELLCODE_TRAMPOLINE = f'bl     #{hex(trampoline_address)};'
@@ -258,23 +275,13 @@ _ = init_sc_tgt.inject_sc(modem, -1, False)
 #
 #     # One trampoline injected!
 #     trampolie_inject_counter += 1
-#
-# # TODO: later....
-# # # Thumb -[blx]-> arm32 pairs
-# # # => Transformed to thumb -[bl]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[blx]-> ARM32 callee
-# # for call_site, callee in tramp_thumb_to_arm32_pairs:
-# #     pass
 # #
-# # # ARM32 -[blx]-> Thumb pairs
-# # # => Transformed to ARM32 -[blx]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[bl]-> Thumb callee
-# # for call_site, callee in tramp_arm32_to_thumb_pairs:
-# #     pass
-# #
-# # # ARM32 -[bl]-> ARM32 pairs
-# # # => Transformed to ARM -[blx]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[blx]-> ARM32 callee
-# # for call_site, callee in tramp_thumb_to_arm32_pairs:
-# #     pass
-#
+
+# # ARM32 -[bl]-> ARM32 pairs
+# # => Transformed to ARM -[blx]-> thumb shellcode tramp -[bl]-> thumb main shellcode -[ret]-> thumb shellcode tramp -[blx]-> ARM32 callee
+# for call_site, callee in tramp_thumb_to_arm32_pairs:
+#     pass
+
 # Write it out...
 
 open("ubi_modem.out.mod", "wb").write(modem)

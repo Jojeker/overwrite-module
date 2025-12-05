@@ -1,9 +1,10 @@
 #include "stdlib.h"
 
 // === Static variables pointers ===
-int* CAN_FUZZ_NOW_PTR = 0x11111111;
-int* IS_INIT = 0x22222222;
-int** REGION_FOR_WRITES = 0x33333333;
+#define STATIC_BASE 0x91D409E4 
+#define CAN_FUZZ_NOW_ADDR (0xa04 + STATIC_BASE)
+#define IS_INIT_ADDR (0xa00 + STATIC_BASE)
+#define REGION_FOR_WRITES_ADDR (0xa08 + STATIC_BASE)
 // ===+++++++++++++++++++++++++++===
 
 // === Patch for getting LR ===
@@ -35,34 +36,33 @@ int** REGION_FOR_WRITES = 0x33333333;
 __attribute__((section(".text.prologue")))
 __attribute__((naked))
 void _start () {
-
-    // TODO: function prologue
-    // ???
+    save_lr();
     make_space_stack();
-
-    // If we are not init, just return early and don't log anything
-    // CAUTION: must be populated by the keystone component s.t. we
-    // can actually use them and do not crash right away.
-    if (! *IS_INIT){
-	return;
-    }
 
     // Define fns for outward communication
     spipe_open_t sofn = (spipe_open_t)(void*)SPIPE_OPEN_ADDR;
     spipe_write_t swfn = (spipe_write_t)(void*)SPIPE_WRITE_ADDR;
     int lr_addr = 0;
-   
-    // TODO: figure out where lr is and read it from the stack (right offset)
-    PATCHED_INSN(lr_addr);
-  
-    // Write the stuff into our buffer (TODO)
-    
-    // Write the address verbatim out
     sofn(9);
-    swfn(9, (char*)lr_addr, 4, 0);
+
+    // If we are not init, just return early and don't log anything
+    // CAUTION: must be populated by the keystone component s.t. we
+    // can actually use them and do not crash right away.
+    if (! (*(int*)IS_INIT_ADDR == 0x13371337)){
+	swfn(9, "UNINIT", 6, 0);
+    } else {
+
+	// TODO: figure out where lr is and read it from the stack (right offset)
+	// PATCHED_INSN(lr_addr);
+      
+	// Write the stuff into our buffer (TODO)
+	
+	// Write the address verbatim out
+	// swfn(9, (char*)lr_addr, 4, 0);
+	swfn(9, "NICE", 4, 0);
+    }
 
     restore_space_stack();
-    // TODO: function epilogue (restore lr)
     ret();
 }
 
