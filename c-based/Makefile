@@ -19,10 +19,18 @@ TRAMPOLINE_ARM_OBJS := $(TRAMPOLINE_ARM_TARGET).o
 
 upload: patch
 	adb push ubi_modem.out.mod /tmp/ubi_modem.out.mod
+	adb push ubi_modem_header.out.mod /tmp/ubi_modem_header.out.mod
 
 patch: all
 	. ~/.venv/bin/activate && \
 	python patch.py
+
+longer: all
+	dd if=/dev/zero bs=$(SIZE) count=1 | tr '\000' '\101' > ones.bin
+	cat ones.bin magic.bin > app.bin
+	cat ubi_modem.out app.bin > long_ubi_modem.out
+	sed -i "s/^NEW_SIZE.*/NEW_SIZE= $$(stat -c '%s' app.bin) + 0xdffd50/" patch.py
+
 
 all: $(MAIN_TARGET).bin $(INIT_TARGET).bin $(TRAMPOLINE_TARGET).bin $(TRAMPOLINE_ARM_TARGET).bin
 

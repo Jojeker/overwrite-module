@@ -1,4 +1,5 @@
 #include "stdlib.h"
+#include "fuzzing.h"
 
 /// For now lets assume that there are no races :)
 
@@ -45,22 +46,22 @@ void _start () {
     int* IS_INIT = (int*)IS_INIT_ADDR;
     *IS_INIT = 0x13371337;
 
+    // CTX population from static section..
+    cov_ctx_t ctx = {
+	.hdr = (cov_hdr_t*)COV_HDR_ADDR,
+	.map = (char*)COV_MAP_ADDR
+    };
+    // Setup the coverage map
+    cov_init(&ctx, (void*)COV_HDR_ADDR, COV_MAP_SIZE);
+  
     openfn(9);
-    writefn(9, "INIT", 4, 0);
+    writefn(9, "INIT OK\n", 8, 0);
+    writefn(9, "COV MAP\n", 8, 0);
+    writefn(9, (char*)COV_HDR_ADDR, 64, 0);
 
     // We use a fixed address for our buffers
-    void **REGION_FOR_WRITES = (void**)REGION_FOR_WRITES_ADDR;
-    *REGION_FOR_WRITES = 0x0;
-    *REGION_FOR_WRITES = mallocfn(1024, "", 0);
-
-    writefn(9, "REGION:", 7, 0);
-    writefn(9, (char*)REGION_FOR_WRITES, 4, 0);
-  
-    // Make sure we can actually request some data
-    // Otherwise we signal that we died.
-    // if(! *REGION_FOR_WRITES){
-	   //  die();
-    // }
+    // void **REGION_FOR_WRITES = (void**)REGION_FOR_WRITES_ADDR;
+    // *REGION_FOR_WRITES = 0x0;
 
     restore_space_stack();
     restore_context_no_lr();

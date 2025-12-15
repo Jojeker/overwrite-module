@@ -93,26 +93,7 @@ static __inline__ void ret(){
     : "memory"
     );
 }
-
-
-// [[maybe_unused]] void *memset(void *str, int c, int n)
-// {
-// 	for(int i=0; i<n; i++){
-// 		((char*)str)[i] = (char)c;
-// 	}
-// 	return str;
-// }
-//
-// [[maybe_unused]] void *memcpy(void *dest, const void *src, int n)
-// {
-//     for (int i = 0; i < n; i++)
-//     {
-//         ((char*)dest)[i] = ((char*)src)[i];
-//     }
-//     return dest;
-// }
-//
-// [[maybe_unused]] int memcmp(const void *s1, const void *s2, unsigned int n) {
+// __inline__ int memcmp(const void *s1, const void *s2, unsigned int n) {
 //     const char *p1 = (const char *)s1;
 //     const char *p2 = (const char *)s2;
 //
@@ -124,13 +105,7 @@ static __inline__ void ret(){
 //     return 0;
 // }
 //
-// [[maybe_unused]] int strlen(const char *s) {
-//     const char *p = s;
-//     while (*p) ++p;
-//     return (int)(p - s);
-// }
-//
-// [[maybe_unused]] void* memsearch(const void* haystack, unsigned int haystack_len, const void* needle, unsigned int needle_len) {
+// __inline__ void* memsearch(const void* haystack, unsigned int haystack_len, const void* needle, unsigned int needle_len) {
 //     if (needle_len == 0 || haystack_len < needle_len) {
 //         return 0;
 //     }
@@ -148,6 +123,25 @@ static __inline__ void ret(){
 //
 //     return 0;
 // }
+//
+//
+//
+// [[maybe_unused]] void *memcpy(void *dest, const void *src, int n)
+// {
+//     for (int i = 0; i < n; i++)
+//     {
+//         ((char*)dest)[i] = ((char*)src)[i];
+//     }
+//     return dest;
+// }
+//
+//
+// [[maybe_unused]] int strlen(const char *s) {
+//     const char *p = s;
+//     while (*p) ++p;
+//     return (int)(p - s);
+// }
+//
 //
 // [[maybe_unused]] static void byte_to_hex(unsigned char byte, char *hex_string) {
 //     const char hex_digits[] = "0123456789ABCDEF\x00";

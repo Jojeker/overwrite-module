@@ -1,3 +1,4 @@
+#include "fuzzing.h"
 #include "stdlib.h"
 
 // === Static variables pointers ===
@@ -39,33 +40,28 @@ void _start () {
     save_lr();
     make_space_stack();
 
-    // Define fns for outward communication
-    spipe_open_t sofn = (spipe_open_t)(void*)SPIPE_OPEN_ADDR;
-    spipe_write_t swfn = (spipe_write_t)(void*)SPIPE_WRITE_ADDR;
+    // LR is taken from the stack..
     int lr_addr = 0;
-    sofn(9);
 
+    // CTX population from static section..
+    cov_ctx_t ctx = {
+	.hdr = (cov_hdr_t*)COV_HDR_ADDR,
+	.map = (char*)COV_MAP_ADDR
+    };
+  
     // If we are not init, just return early and don't log anything
-    // CAUTION: must be populated by the keystone component s.t. we
-    // can actually use them and do not crash right away.
     if (! (*(int*)IS_INIT_ADDR == 0x13371337)){
-	swfn(9, "UNINIT", 6, 0);
-    } else {
+	goto poor_mans_return;
+    } 
 
-	// TODO: figure out where lr is and read it from the stack (right offset)
-	PATCHED_INSN(lr_addr);
-      
-	// Write the stuff into our buffer (TODO)
-	
-	// Write the address verbatim out
-	// swfn(9, (char*)lr_addr, 4, 0);
-	swfn(9, "OUT:", 4, 0);
-	// We give the address of lr_address since the function
-	// dereferences the ptr and prints whatever is stored in
-	// the variable (and beyond ;*)
-	swfn(9, (char*)&lr_addr, 4, 0);
-    }
+    // NOTE: we cannot call any functions here, as we otherwise get
+    // recursive trampolines... (Reimplement or cov. denylist)
+ 
+    // Get the actual LR address...
+    PATCHED_INSN(lr_addr);
+    cov_hit(&ctx, lr_addr);
 
+poor_mans_return:
     restore_space_stack();
     ret();
 }
