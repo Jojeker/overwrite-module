@@ -38,11 +38,11 @@ void _start () {
     store_context_and_lr();
     make_space_stack();
 
-    malloc_t mallocfn = (malloc_t)(void*)MALLOC_ADDR;
+    // malloc_t mallocfn = (malloc_t)(void*)MALLOC_ADDR;
     spipe_open_t openfn = (spipe_open_t)(void*)SPIPE_OPEN_ADDR;
     spipe_write_t writefn = (spipe_write_t)(void*)SPIPE_WRITE_ADDR;
     
-    // For now we just set the IS_INIT flag and get a region via malloc
+    // For now we just set the IS_INIT flag
     int* IS_INIT = (int*)IS_INIT_ADDR;
     *IS_INIT = 0x13371337;
 
