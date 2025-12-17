@@ -5,3 +5,7 @@
 *.out
 ones
 
+ubi0_*
+
+dump*
+slog
