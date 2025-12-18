@@ -126,15 +126,15 @@ static __inline__ void ret(){
 //
 //
 //
-// [[maybe_unused]] void *memcpy(void *dest, const void *src, int n)
-// {
-//     for (int i = 0; i < n; i++)
-//     {
-//         ((char*)dest)[i] = ((char*)src)[i];
-//     }
-//     return dest;
-// }
-//
+void *memcpy(void *dest, const void *src, int n)
+{
+    for (int i = 0; i < n; i++)
+    {
+        ((char*)dest)[i] = ((char*)src)[i];
+    }
+    return dest;
+}
+
 //
 // [[maybe_unused]] int strlen(const char *s) {
 //     const char *p = s;

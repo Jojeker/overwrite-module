@@ -1,13 +1,6 @@
 #include "fuzzing.h"
 #include "stdlib.h"
 
-// === Static variables pointers ===
-#define STATIC_BASE 0x91D409E4 
-#define CAN_FUZZ_NOW_ADDR (0xa04 + STATIC_BASE)
-#define IS_INIT_ADDR (0xa00 + STATIC_BASE)
-#define REGION_FOR_WRITES_ADDR (0xa08 + STATIC_BASE)
-// ===+++++++++++++++++++++++++++===
-
 // === Patch for getting LR ===
 // we increase SP by 0x100 so we have to
 // add 100 (our stack frame) + 12*4 for the other registers (r0 - r11)
@@ -33,7 +26,9 @@
 //      bl       24-bit-value (THUMB TRAMPLOINE)
 // ==============================================
 
-// main shellcode 
+// ---- main shellcode ---
+// NOTE: we cannot call any functions here, as we otherwise get
+// recursive trampolines... (Reimplement or cov. denylist)
 __attribute__((section(".text.prologue")))
 __attribute__((naked))
 void _start () {
@@ -49,13 +44,10 @@ void _start () {
 	.map = (char*)COV_MAP_ADDR
     };
   
-    // If we are not init, just return early and don't log anything
-    if (! (*(int*)IS_INIT_ADDR == 0x13371337)){
+    // We have to actively ack the use of our map
+    if (!is_cov_ready(&ctx)){
 	goto poor_mans_return;
-    } 
-
-    // NOTE: we cannot call any functions here, as we otherwise get
-    // recursive trampolines... (Reimplement or cov. denylist)
+    }
  
     // Get the actual LR address...
     PATCHED_INSN(lr_addr);

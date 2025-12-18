@@ -43,18 +43,7 @@ typedef int (*spawn_threadx_thread)(
     int auto_start                 // index into DAT_8f82a168 table (likely 0/1)
 );
 
-void __inline__ *omemcpy(void *dest, const void *src, int n)
-{
-    for (int i = 0; i < n; i++)
-    {
-        ((char*)dest)[i] = ((char*)src)[i];
-    }
-    return dest;
-}
-
-
-#define TASK_ENTRY_FN_ADDR 0xfffffff
-
 // At 0x8fba1616 (thumb)
-#define NRRC_RECEIVE_PAYL_ADDR 0x8fba1616
-typedef nrrc_msg* (*NRRC_RECEIVE_PAYL_t)(nrrc_msg*);
+typedef void* (*CCCH_parse)(nrrc_msg*);
+typedef void* (*BCCH_parse)(nrrc_msg*);
+typedef void* (*DCCH_parse)(char* payl, int size, void* parsed);

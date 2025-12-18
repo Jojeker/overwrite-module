@@ -157,13 +157,14 @@ def main():
             # Plain string; skip if we already used it as a %s argument
             if start in used_string_starts:
                 continue
-            print(f"{source}:0x{start:08X}: {fmt_str}")
+            print(f"[O] {source}:0x{start:08X}: {fmt_str}")
             continue
 
         args = build_args_for_specs(data, specs, end, nul_idx, used_string_starts)
         log_line = format_log(fmt_str, args)
 
-        print(f"{source}:0x{start:08X}: {log_line}")
+        print(f"[A] {source}:0x{start:08X}: {fmt_str}")
+        print(f"[B] {source}:0x{start:08X}: {log_line}")
 
 
 if __name__ == "__main__":

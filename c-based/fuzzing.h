@@ -13,13 +13,23 @@
 // Use a 128KiB map size
 #define COV_MAP_SIZE 0x20000 
 
+
+// Some static variables that we are intested in
+#define CONFIG_LOGGING_RRC 0x91810b1c 
+#define CONFIG_LOGGING_SBUF_EN 0x91810B1C
+
+#define NRRC_RECEIVE_PAYL_ADDR (0x8fba1616 | 1)
+#define NRRC_RECEIVE_BCCH_BCH_DATA (0x8fba4bca | 1)
+#define NRRC_RECEIVE_DCCH_DATA (0x8fc5e6e2| 1)
+#define DL_SCH_PARSE_ADDR (0x8fc8cd3a)
+
 // Header of our fuzzing setup (64 bytes)
 typedef struct __attribute__((packed)) {
   int magic;
   int version;
   int map_size;
   int iter_count;
-  int dump_seq;
+  int is_ready;
   int dump_ready;
   int last_lr;
   char  reserved[64 - 7*4];
@@ -71,7 +81,12 @@ static __inline void cov_init(cov_ctx_t *c, void *base, int map_size) {
 	c->hdr->magic = MAGIC;
 	c->hdr->version = 1;
 	c->hdr->map_size = map_size;
+	c->hdr->is_ready = 0x13371337;
     }
+}
+
+static __inline int is_cov_ready(cov_ctx_t* c){
+  return c->hdr->is_ready == 0x13371337;
 }
 
 static __inline void cov_hit(cov_ctx_t *c, int lr) {
