@@ -176,6 +176,9 @@ void task_entry_fn(){
     store_context_and_lr();
     make_space_stack();
 
+    // Force the state to be 1
+    set_rrc_state(STATE_OFF_MAIN, 1);
+
     // Yeah
     char* sib1 =    "D\240\b \002\001\000\000\001\000\000\000\000\n\001\016\000 \000$d\300\000&\260\000?\000\004\000\000\000I$!\360P\200\000\000\220\000\000\221\223\200\000L\000\002\000E\231\210\200\001Zf\201\300\bR\332\000\240";
     int sib1_len = 66;

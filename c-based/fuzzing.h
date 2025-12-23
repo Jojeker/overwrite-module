@@ -1,3 +1,4 @@
+#include <sys/types.h>
 #ifndef FUZZING_H
 
 #define MAGIC 0xBA5E5C0E 
@@ -22,6 +23,24 @@
 #define NRRC_RECEIVE_BCCH_BCH_DATA (0x8fba4bca | 1)
 #define NRRC_RECEIVE_DCCH_DATA (0x8fc5e6e2| 1)
 #define DL_SCH_PARSE_ADDR (0x8fc8cd3a)
+
+#define STATE_BASE 0x92ba67a4
+#define STATE_OFF_MAIN 4
+#define STATE_OFF_NULL 8
+#define STATE_OFF_IDLE 0x1
+#define STATE_OFF_INACT 0x18
+#define STATE_OFF_NRCON 0x20
+#define STATE_OFF_SCG 0x28
+#define STATE_OFF_SIB  0x30
+#define STATE_OFF_MES  0x3c
+#define STATE_OFF_CR 0x44
+
+void set_rrc_state(int reg, int val){
+  char *a = (char*)STATE_BASE;
+  a += reg;
+  *(short*)a = val;
+}
+
 
 // Header of our fuzzing setup (64 bytes)
 typedef struct __attribute__((packed)) {
