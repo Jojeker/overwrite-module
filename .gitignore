@@ -9,4 +9,7 @@ shellcode.elf
 shellcode.bin
 out.txt
 .null-*
+log_replay/volatile
+log_replay/extract_dev_writes.py
+
 
