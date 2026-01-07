@@ -34,7 +34,7 @@ AT+QCFG="usbnet"
 
 # Must be set (default though)
 AT+QCFG="nat"
-+QCFG: "nat",5
++QCFG: "nat",0
 
 # The apn might be autoconfigured by the operator
 AT+CGDCONT=1,"IP","internet"
